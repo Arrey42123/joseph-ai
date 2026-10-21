@@ -1,3 +1,10 @@
+const express = require('express');
+const app = express();
+app.get('/', (req, res) => res.send('THE JOSEPH AI IS ONLINE'));
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log('Web on port '+PORT));
+
+
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
 const { Boom } = require("@hapi/boom")
 const pino = require("pino")

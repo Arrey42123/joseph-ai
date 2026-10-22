@@ -25,13 +25,13 @@ async function startJosephAI() {
     logger: pino({ level: "silent" }),
     auth: state,
     browser: ["THE JOSEPH AI", "Chrome", "1.0.0"],
-    printQRInTerminal: false, // We will use pairing code instead
+    printQRInTerminal: false,
   });
 
   sock.ev.on("creds.update", saveCreds);
 
   sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+    const { connection, lastDisconnect } = update;
 
     if (connection === "close") {
       const shouldReconnect = (lastDisconnect?.error instanceof Boom)
@@ -46,17 +46,19 @@ async function startJosephAI() {
       console.log("✅ THE JOSEPH AI is connected successfully!");
     }
 
-    // Request pairing code if not registered
+    // Show pairing code if not registered
     if (!sock.authState.creds.registered) {
-      const phoneNumber = config.owner[0]; // Uses the number in config.js
+      const phoneNumber = config.owner[0];
       setTimeout(async () => {
-        const code = await sock.requestPairingCode(phoneNumber);
-        console.log("=================================");
-        console.log("PAIRING CODE:", code);
-        console.log("=================================");
-        console.log("Go to WhatsApp → Linked Devices → Link with phone number");
-        console.log("Enter this code:", code);
-      }, 3000);
+        try {
+          const code = await sock.requestPairingCode(phoneNumber);
+          console.log("=================================");
+          console.log("PAIRING CODE:", code);
+          console.log("=================================");
+        } catch (e) {
+          console.log("Error getting pairing code:", e.message);
+        }
+      }, 5000);
     }
   });
 
@@ -67,16 +69,13 @@ async function startJosephAI() {
 
     const from = msg.key.remoteJid;
     const body = msg.message.conversation || 
-                 msg.message.extendedTextMessage?.text || 
-                 msg.message.imageMessage?.caption || "";
+                 msg.message.extendedTextMessage?.text || "";
 
     const isCmd = body.startsWith(config.prefix);
     const command = isCmd ? body.slice(config.prefix.length).trim().split(" ")[0].toLowerCase() : "";
 
-    if (isCmd) {
-      try {
-        if (command === "menu" || command === "help") {
-          const menuText = `
+    if (command === "menu" || command === "help") {
+      const menuText = `
 ╭═══ *THE JOSEPH AI* ═══⊷
 ┃❃╭──────────────
 ┃❃│ Prefix : ${config.prefix}
@@ -90,24 +89,18 @@ async function startJosephAI() {
 │ • .ping
 │ • .alive
 ╰─────────────────
+      `;
+      await sock.sendMessage(from, { text: menuText.trim() }, { quoted: msg });
+    }
 
-More features coming soon...
-          `;
-          await sock.sendMessage(from, { text: menuText.trim() }, { quoted: msg });
-        }
+    if (command === "ping") {
+      await sock.sendMessage(from, { text: "Pong! 🏓" }, { quoted: msg });
+    }
 
-        if (command === "ping") {
-          await sock.sendMessage(from, { text: "Pong! 🏓" }, { quoted: msg });
-        }
-
-        if (command === "alive") {
-          await sock.sendMessage(from, { 
-            text: `✅ *${config.botName}* is alive and running!\nVersion: ${config.version}` 
-          }, { quoted: msg });
-        }
-      } catch (err) {
-        console.error(err);
-      }
+    if (command === "alive") {
+      await sock.sendMessage(from, { 
+        text: `✅ *${config.botName}* is alive!\nVersion: ${config.version}` 
+      }, { quoted: msg });
     }
   });
 }

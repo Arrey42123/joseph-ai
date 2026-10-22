@@ -1,66 +1,77 @@
 const express = require('express');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys");
+const { Boom } = require("@hapi/boom");
+const pino = require("pino");
+const fs = require("fs");
+const config = require("./config");
+
 const app = express();
-app.get('/', (req, res) => res.send('THE JOSEPH AI IS ONLINE'));
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log('Web on port '+PORT));
 
+app.get('/', (req, res) => {
+  res.send('THE JOSEPH AI is running!');
+});
 
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require("@whiskeysockets/baileys")
-const { Boom } = require("@hapi/boom")
-const pino = require("pino")
-const qrcode = require("qrcode-terminal")
-const fs = require("fs")
-const config = require("./config")
+app.listen(PORT, () => {
+  console.log(`Web server running on port ${PORT}`);
+});
 
 async function startJosephAI() {
-  const { state, saveCreds } = await useMultiFileAuthState("auth")
-  const { version } = await fetchLatestBaileysVersion()
+  const { state, saveCreds } = await useMultiFileAuthState("auth");
+  const { version } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
     version,
     logger: pino({ level: "silent" }),
-    printQRInTerminal: true,
     auth: state,
     browser: ["THE JOSEPH AI", "Chrome", "1.0.0"],
-    generateHighQualityLinkPreview: true,
-  })
+    printQRInTerminal: false, // We will use pairing code instead
+  });
 
-  sock.ev.on("creds.update", saveCreds)
+  sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect, qr } = update
-
-    if (qr) {
-      console.log("Scan this QR code with your WhatsApp:")
-      qrcode.generate(qr, { small: true })
-    }
+  sock.ev.on("connection.update", async (update) => {
+    const { connection, lastDisconnect, qr } = update;
 
     if (connection === "close") {
       const shouldReconnect = (lastDisconnect?.error instanceof Boom)
         ? lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut
-        : true
+        : true;
 
-      console.log("Connection closed. Reconnecting:", shouldReconnect)
+      console.log("Connection closed. Reconnecting:", shouldReconnect);
       if (shouldReconnect) {
-        startJosephAI()
+        startJosephAI();
       }
     } else if (connection === "open") {
-      console.log("✅ THE JOSEPH AI is connected successfully!")
+      console.log("✅ THE JOSEPH AI is connected successfully!");
     }
-  })
+
+    // Request pairing code if not registered
+    if (!sock.authState.creds.registered) {
+      const phoneNumber = config.owner[0]; // Uses the number in config.js
+      setTimeout(async () => {
+        const code = await sock.requestPairingCode(phoneNumber);
+        console.log("=================================");
+        console.log("PAIRING CODE:", code);
+        console.log("=================================");
+        console.log("Go to WhatsApp → Linked Devices → Link with phone number");
+        console.log("Enter this code:", code);
+      }, 3000);
+    }
+  });
 
   sock.ev.on("messages.upsert", async ({ messages, type }) => {
-    if (type !== "notify") return
-    const msg = messages[0]
-    if (!msg.message || msg.key.fromMe) return
+    if (type !== "notify") return;
+    const msg = messages[0];
+    if (!msg.message || msg.key.fromMe) return;
 
-    const from = msg.key.remoteJid
+    const from = msg.key.remoteJid;
     const body = msg.message.conversation || 
                  msg.message.extendedTextMessage?.text || 
-                 msg.message.imageMessage?.caption || ""
+                 msg.message.imageMessage?.caption || "";
 
-    const isCmd = body.startsWith(config.prefix)
-    const command = isCmd ? body.slice(config.prefix.length).trim().split(" ")[0].toLowerCase() : ""
+    const isCmd = body.startsWith(config.prefix);
+    const command = isCmd ? body.slice(config.prefix.length).trim().split(" ")[0].toLowerCase() : "";
 
     if (isCmd) {
       try {
@@ -81,29 +92,24 @@ async function startJosephAI() {
 ╰─────────────────
 
 More features coming soon...
-          `
-          await sock.sendMessage(from, { text: menuText.trim() }, { quoted: msg })
+          `;
+          await sock.sendMessage(from, { text: menuText.trim() }, { quoted: msg });
         }
 
         if (command === "ping") {
-          const start = Date.now()
-          await sock.sendMessage(from, { text: "Pong! 🏓" }, { quoted: msg })
-          const end = Date.now()
-          await sock.sendMessage(from, { text: `Response time: ${end - start} ms` }, { quoted: msg })
+          await sock.sendMessage(from, { text: "Pong! 🏓" }, { quoted: msg });
         }
 
         if (command === "alive") {
           await sock.sendMessage(from, { 
             text: `✅ *${config.botName}* is alive and running!\nVersion: ${config.version}` 
-          }, { quoted: msg })
+          }, { quoted: msg });
         }
-
       } catch (err) {
-        console.error(err)
-        await sock.sendMessage(from, { text: "An error occurred." }, { quoted: msg })
+        console.error(err);
       }
     }
-  })
+  });
 }
 
-startJosephAI()
+startJosephAI();
